@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TG-Manager 2026</title>
+    
+    <link rel="apple-touch-icon" href="https://img.icons8.com/fluency/180/shield.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TG Manager">
+
+    <style>
+        :root { --apple-blue: #007AFF; --system-gray: #f2f2f7; --success-green: #34c759; --warning-orange: #ff9500; }
+        body { font-family: -apple-system, sans-serif; background-color: var(--system-gray); margin: 0; padding: 15px 15px 180px 15px; color: #1c1c1e; }
+        .header { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); padding: 20px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 20px; position: sticky; top: 10px; z-index: 10; }
+        .stats { display: flex; justify-content: space-between; font-weight: bold; font-size: 1.1em; }
+        .card { background: white; border-radius: 15px; padding: 16px; margin-bottom: 12px; position: relative; border-left: 6px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .card.paid { border-left-color: var(--success-green); background: #f2fff5; }
+        .card.pending { border-left-color: var(--warning-orange); }
+        .delete-btn { position: absolute; top: 10px; right: 12px; color: #ff3b30; text-decoration: none; font-size: 0.8em; }
+        .period-title { font-size: 1.1em; font-weight: 700; margin-bottom: 12px; display: block; }
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin: 12px 0; background: #f8f8f8; padding: 10px; border-radius: 10px; }
+        .status-grid label { display: flex; flex-direction: column; align-items: center; font-size: 0.7em; color: #666; gap: 5px; }
+        .date-range { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .input-group label { font-size: 0.65em; color: #8e8e93; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; display: block; }
+        input[type="date"], input[type="number"] { border: 1px solid #ddd; padding: 10px; border-radius: 10px; font-size: 16px; width: 100%; box-sizing: border-box; -webkit-appearance: none; }
+        .controls { position: fixed; bottom: 0; left: 0; right: 0; padding: 20px 15px 40px 15px; background: rgba(242, 242, 247, 0.8); backdrop-filter: blur(15px); display: flex; flex-direction: column; gap: 10px; z-index: 100; }
+        .add-btn { background: var(--apple-blue); color: white; border: none; padding: 18px; border-radius: 15px; font-size: 1.1em; font-weight: 600; }
+        .export-btn { background: #8e8e93; color: white; border: none; padding: 12px; border-radius: 12px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="stats">
+        <span>Erstattet: <span id="totalEur">0.00</span> €</span>
+        <span>Offen: <span id="openCount">0</span></span>
+    </div>
+</div>
+
+<div id="listContainer"></div>
+
+<div class="controls">
+    <button class="export-btn" onclick="exportData()">Daten als Text kopieren</button>
+    <button class="add-btn" onclick="addPeriod()">+ Zeitraum hinzufügen</button>
+</div>
+
+<script>
+    let periods = JSON.parse(localStorage.getItem('tgData_final')) || [];
+
+    function addPeriod() {
+        let start;
+        if (periods.length === 0) {
+            start = new Date('2026-01-05');
+        } else {
+            let lastEndStr = periods[periods.length - 1].endRaw;
+            let parts = lastEndStr.split('-');
+            start = new Date(parts[0], parts[1]-1, parts[2]);
+            start.setDate(start.getDate() + 1);
+        }
+        
+        let end = new Date(start);
+        end.setDate(end.getDate() + 13);
+        
+        const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        const de = (d) => String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getFullYear()).slice(-2);
+        
+        periods.push({ 
+            title: de(start) + " - " + de(end), 
+            startRaw: iso(start), 
+            endRaw: iso(end), 
+            requested: false, 
+            approved: false, 
+            paid: false, 
+            weStart: '', 
+            weEnd: '', 
+            amount: 0 
+        });
+        saveAndRender();
+    }
+
+    function saveAndRender() {
+        localStorage.setItem('tgData_final', JSON.stringify(periods));
+        const container = document.getElementById('listContainer');
+        container.innerHTML = '';
+        let total = 0; let pending = 0;
+
+        periods.forEach((p, index) => {
+            if (p.paid) total += parseFloat(p.amount || 0);
+            if (p.requested && !p.paid) pending++;
+            const card = document.createElement('div');
+            card.className = `card ${p.paid ? 'paid' : (p.requested ? 'pending' : '')}`;
+            card.innerHTML = `
+                <a href="#" class="delete-btn" onclick="deletePeriod(${index})">Löschen</a>
+                <span class="period-title">${p.title}</span>
+                <div class="status-grid">
+                    <label><input type="checkbox" ${p.requested?'checked':''} onchange="update(${index}, 'requested', this.checked, true)"> Antr.</label>
+                    <label><input type="checkbox" ${p.approved?'checked':''} onchange="update(${index}, 'approved', this.checked, true)"> Bew.</label>
+                    <label><input type="checkbox" ${p.paid?'checked':''} onchange="update(${index}, 'paid', this.checked, true)"> Bezahlt</label>
+                </div>
+                <div class="input-group"><label>WE (Von - Bis)</label><div class="date-range">
+                    <input type="date" value="${p.weStart}" onchange="update(${index}, 'weStart', this.value, false)"> - 
+                    <input type="date" value="${p.weEnd}" onchange="update(${index}, 'weEnd', this.value, false)">
+                </div></div>
+                <div class="input-group"><label>Betrag (€)</label>
+                <input type="number" step="0.01" value="${p.amount || ''}" oninput="update(${index}, 'amount', this.value, false)" onblur="saveAndRender()"></div>`;
+            container.appendChild(card);
+        });
+        updateStats(total, pending);
+    }
+
+    function update(index, field, value, redraw) {
+        periods[index][field] = value;
+        localStorage.setItem('tgData_final', JSON.stringify(periods));
+        if (redraw) saveAndRender();
+        else {
+            let total = 0; let pending = 0;
+            periods.forEach(p => {
+                if (p.paid) total += parseFloat(p.amount || 0);
+                if (p.requested && !p.paid) pending++;
+            });
+            updateStats(total, pending);
+        }
+    }
+
+    function updateStats(total, pending) {
+        document.getElementById('totalEur').innerText = total.toFixed(2);
+        document.getElementById('openCount').innerText = pending;
+    }
+
+    function deletePeriod(index) { if(confirm("Löschen?")) { periods.splice(index, 1); saveAndRender(); } }
+
+    function exportData() {
+        let txt = "TG-ÜBERSICHT 2026\n";
+        periods.forEach(p => { txt += `${p.title} | WE: ${p.weStart}-${p.weEnd} | ${p.amount}€ | ${p.paid?'BEZAHLT':'OFFEN'}\n`; });
+        navigator.clipboard.writeText(txt).then(() => alert("Kopiert!"));
+    }
+    saveAndRender();
+</script>
+</body>
+</html>
